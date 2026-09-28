@@ -1,0 +1,14 @@
+{
+  "name": "Philco Smart Color",
+  "short_name": "Smart Color",
+  "description": "Control no oficial por Bluetooth para la lámpara Philco Smart Color.",
+  "start_url": "./index.html",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#100e1a",
+  "theme_color": "#14121f",
+  "orientation": "portrait",
+  "icons": [
+    { "src": "icons/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" }
+  ]
+}

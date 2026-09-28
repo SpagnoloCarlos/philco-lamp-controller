@@ -1,0 +1,186 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<meta name="theme-color" content="#14121f" />
+<title>Philco Smart Color</title>
+<meta name="description" content="Control no oficial para la lámpara Philco Smart Color (Bluetooth)." />
+<link rel="manifest" href="manifest.webmanifest" />
+<link rel="icon" href="icons/icon.svg" type="image/svg+xml" />
+<link rel="apple-touch-icon" href="icons/icon.svg" />
+<link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+<div class="app">
+
+  <header class="topbar">
+    <div class="brand">
+      <span class="brand-dot" id="brandDot"></span>
+      <div>
+        <h1>Philco Smart Color</h1>
+        <p class="subtitle">Control no oficial · Bluetooth</p>
+      </div>
+    </div>
+    <button id="btnConnect" class="btn btn-primary">Conectar</button>
+  </header>
+
+  <p id="statusLine" class="status-line">Sin conectar.</p>
+
+  <nav class="tabs" role="tablist">
+    <button class="tab active" data-tab="control" role="tab" aria-selected="true">Control</button>
+    <button class="tab" data-tab="diag" role="tab" aria-selected="false">Diagnóstico</button>
+    <button class="tab" data-tab="settings" role="tab" aria-selected="false">Ajustes</button>
+  </nav>
+
+  <!-- ============ CONTROL ============ -->
+  <section id="panel-control" class="panel active">
+
+    <div class="card power-card">
+      <button id="btnPower" class="power-btn" disabled aria-pressed="false">
+        <svg viewBox="0 0 24 24" width="34" height="34" aria-hidden="true">
+          <path d="M12 2v9" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/>
+          <path d="M6 5.5a8 8 0 1 0 12 0" stroke="currentColor" stroke-width="2.2" fill="none" stroke-linecap="round"/>
+        </svg>
+      </button>
+      <div>
+        <p class="power-label">Encendido / Apagado</p>
+        <p class="power-hint" id="powerHint">Conectá la lámpara para controlarla</p>
+      </div>
+    </div>
+
+    <div class="card">
+      <label class="field-label" for="sliderBrightness">Brillo</label>
+      <div class="slider-row">
+        <input type="range" id="sliderBrightness" min="1" max="100" value="100" disabled />
+        <span class="slider-value" id="brightnessValue">100%</span>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="field-label-row">
+        <label class="field-label">Color</label>
+        <input type="color" id="colorPicker" value="#ff9d3c" disabled />
+      </div>
+      <div class="swatches" id="swatchesColor"></div>
+    </div>
+
+    <div class="card">
+      <div class="field-label-row">
+        <label class="field-label" for="sliderWhite">Blanco (temperatura)</label>
+        <button id="btnUseWhite" class="btn btn-ghost btn-small" disabled>Usar blanco</button>
+      </div>
+      <div class="slider-row white-slider">
+        <span class="temp-end">Cálido</span>
+        <input type="range" id="sliderWhite" min="0" max="100" value="50" disabled />
+        <span class="temp-end">Frío</span>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="field-label-row">
+        <label class="field-label">Favoritos</label>
+        <button id="btnSaveFavorite" class="btn btn-ghost btn-small" disabled>+ Guardar actual</button>
+      </div>
+      <div class="swatches" id="swatchesFavorites"></div>
+      <p class="hint" id="favoritesHint">Todavía no guardaste colores favoritos.</p>
+    </div>
+
+  </section>
+
+  <!-- ============ DIAGNÓSTICO ============ -->
+  <section id="panel-diag" class="panel">
+
+    <div class="card">
+      <p class="field-label">1. Buscar la lámpara</p>
+      <p class="hint">Asegurate de que esté encendida (enchufada / con la llave de luz dada).</p>
+      <div class="btn-row">
+        <button id="btnScanFiltered" class="btn btn-primary">Buscar lámpara Philco</button>
+        <button id="btnScanAny" class="btn btn-ghost">Buscar cualquier BLE</button>
+      </div>
+    </div>
+
+    <div class="card">
+      <p class="field-label">2. Iniciar sesión (mesh)</p>
+      <p class="hint">Prueba automáticamente las credenciales de fábrica más comunes.</p>
+      <div class="btn-row">
+        <button id="btnTryLogin" class="btn btn-primary" disabled>Probar credenciales</button>
+      </div>
+      <div id="loginPresetsLog" class="log-list"></div>
+    </div>
+
+    <div class="card">
+      <p class="field-label">3. Dirección MAC de la lámpara</p>
+      <p class="hint">
+        Chrome no permite leer la MAC real por Bluetooth desde una web (por privacidad).
+        Necesaria para enviar comandos. Se detecta sola justo después de un reset de fábrica;
+        si no aparece, usá una app como <strong>nRF Connect</strong> para escanear y copiarla.
+      </p>
+      <div class="mac-row">
+        <input type="text" id="macInput" placeholder="AA:BB:CC:DD:EE:FF" autocomplete="off" spellcheck="false" />
+        <button id="btnTestMac" class="btn btn-ghost" disabled>Probar (parpadea)</button>
+      </div>
+      <p class="hint" id="macDetectedHint"></p>
+    </div>
+
+    <div class="card">
+      <p class="field-label">4. Servicios GATT</p>
+      <button id="btnExploreGatt" class="btn btn-ghost" disabled>Listar servicios y características</button>
+      <pre id="gattDump" class="code-dump"></pre>
+    </div>
+
+    <div class="card">
+      <p class="field-label">Registro</p>
+      <pre id="diagLog" class="code-dump log"></pre>
+    </div>
+
+  </section>
+
+  <!-- ============ AJUSTES ============ -->
+  <section id="panel-settings" class="panel">
+
+    <div class="card">
+      <p class="field-label">Credenciales de la malla (mesh)</p>
+      <label class="mini-label" for="setMeshName">Nombre</label>
+      <input type="text" id="setMeshName" />
+      <label class="mini-label" for="setMeshPassword">Contraseña</label>
+      <input type="text" id="setMeshPassword" />
+    </div>
+
+    <div class="card">
+      <p class="field-label">Perfil de comandos</p>
+      <select id="setProfile">
+        <option value="generic">Genérico (Fulife / Mesh Lamp / V-TAC) — recomendado</option>
+        <option value="livarno">Livarno / Briloner (Lidl)</option>
+      </select>
+      <p class="hint">Si los colores o el blanco no responden bien, probá el otro perfil.</p>
+    </div>
+
+    <div class="card">
+      <p class="field-label">Rango de blanco (Kelvin)</p>
+      <div class="kelvin-row">
+        <input type="number" id="setMinKelvin" min="1000" max="10000" step="50" />
+        <span>—</span>
+        <input type="number" id="setMaxKelvin" min="1000" max="10000" step="50" />
+      </div>
+    </div>
+
+    <div class="card">
+      <p class="field-label">Dirección MAC</p>
+      <input type="text" id="setMac" placeholder="AA:BB:CC:DD:EE:FF" autocomplete="off" spellcheck="false" />
+    </div>
+
+    <div class="card">
+      <button id="btnSaveSettings" class="btn btn-primary">Guardar ajustes</button>
+      <button id="btnForget" class="btn btn-danger">Olvidar dispositivo y borrar datos</button>
+    </div>
+
+    <p class="hint version-hint">Philco Smart Color Web — control no oficial. Ver <code>PROTOCOL.md</code> para detalles técnicos.</p>
+
+  </section>
+
+</div>
+
+<script type="module" src="js/app.js"></script>
+</body>
+</html>
