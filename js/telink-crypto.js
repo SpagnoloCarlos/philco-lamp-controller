@@ -136,11 +136,14 @@ export async function buildPairRequest(name, password, random8) {
 }
 
 export async function parsePairResponse(name, password, random8, response) {
+  // Some firmwares reply with just the single 0x0E status byte on a rejected
+  // login instead of the full 17-byte frame — check this before the length guard
+  // below, or a real "wrong credentials" answer gets misreported as a malformed one.
+  if (response.length >= 1 && response[0] === PAIR_RESPONSE_FAIL) {
+    throw new TelinkAuthError('la lámpara rechazó este nombre/contraseña de malla');
+  }
   if (response.length < 9) {
     throw new TelinkProtocolError(`pairing response too short: ${toHex(response)}`);
-  }
-  if (response[0] === PAIR_RESPONSE_FAIL) {
-    throw new TelinkAuthError('device rejected mesh name / password');
   }
   if (response[0] !== PAIR_RESPONSE_OK) {
     throw new TelinkProtocolError(`unexpected pairing response 0x${response[0].toString(16)}`);
