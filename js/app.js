@@ -553,7 +553,9 @@ els.btnConnect.addEventListener('click', async () => {
       setStatus('Reconectando…');
     } else {
       setStatus('Buscando lámpara…');
-      await session.requestDevice();
+      // Sin filtro: algunas lámparas (confirmado con esta Philco) no siempre anuncian
+      // el UUID corto 0x1910 que usaría el filtro, y entonces nunca aparecerían.
+      await session.requestDeviceAny();
       Store.set('deviceId', session.device.id);
     }
     await runConnectSequence();
