@@ -1,6 +1,7 @@
 import * as T from './telink-crypto.js';
 import { getProfile, CREDENTIAL_PRESETS } from './telink-profiles.js';
 import { TelinkSession, bluetoothAvailable } from './ble.js';
+import { hueToHex, rgbToHue, createHueRing } from './color-wheel.js';
 
 // --- persistence ------------------------------------------------------------
 
@@ -27,12 +28,13 @@ const defaults = {
   meshName: 'telink_mesh1',
   meshPassword: '123',
   profile: 'generic',
-  minKelvin: 3000,
-  maxKelvin: 6000,
+  minKelvin: 2700,
+  maxKelvin: 6500,
   mac: null,
   deviceId: null,
   favorites: [],
-  lastColor: '#ff9d3c',
+  lastColor: '#ff0000',
+  lastHue: 0,
   lastBrightness: 100,
   lastMode: 'color', // 'color' | 'white'
   lastWhite: 50,
@@ -73,11 +75,17 @@ const els = {
   sliderBrightness: $('sliderBrightness'),
   brightnessValue: $('brightnessValue'),
   colorPicker: $('colorPicker'),
+  wheelWrap: $('wheelWrap'),
+  wheelRing: $('wheelRing'),
+  wheelThumb: $('wheelThumb'),
   swatchesColor: $('swatchesColor'),
   sliderWhite: $('sliderWhite'),
   whiteTempRow: $('whiteTempRow'),
-  whiteHint: $('whiteHint'),
+  whitePresets: $('whitePresets'),
   btnUseWhite: $('btnUseWhite'),
+  btnMusicToggle: $('btnMusicToggle'),
+  musicMeterFill: $('musicMeterFill'),
+  musicHint: $('musicHint'),
   btnSaveFavorite: $('btnSaveFavorite'),
   swatchesFavorites: $('swatchesFavorites'),
   favoritesHint: $('favoritesHint'),
@@ -108,10 +116,9 @@ function logDiag(msg) {
   els.diagLog.textContent = `[${t}] ${msg}\n` + els.diagLog.textContent;
 }
 
-const PRESET_COLORS = [
-  '#ff3b30', '#ff9500', '#ffcc00', '#34c759', '#00c7be', '#30b0c7',
-  '#007aff', '#5856d6', '#af52de', '#ff2d92', '#ffffff', '#ff9d3c',
-];
+// 12 colores parejos alrededor de la rueda (30° cada uno), igual que "Colores
+// predeterminados" del manual (Rojo, Rojo Naranja, Naranja, ... Rojo Violeta).
+const PRESET_HUES = Array.from({ length: 12 }, (_, i) => i * 30);
 
 // --- tabs ------------------------------------------------------------
 
@@ -150,29 +157,25 @@ function setConnectionUi(state) {
     els.colorPicker,
     els.sliderWhite,
     els.btnUseWhite,
+    els.btnMusicToggle,
     els.btnSaveFavorite,
   ]) {
     el.disabled = !controlsEnabled;
   }
+  els.wheelWrap.dataset.disabled = String(!controlsEnabled);
   for (const btn of els.swatchesColor.querySelectorAll('button')) btn.disabled = !controlsEnabled;
   for (const btn of els.swatchesFavorites.querySelectorAll('button')) btn.disabled = !controlsEnabled;
+  for (const btn of els.whitePresets.querySelectorAll('button')) btn.disabled = !controlsEnabled;
   els.powerHint.textContent = controlsEnabled ? 'Lista para usar' : 'Conectá la lámpara para controlarla';
   els.btnTryLogin.disabled = !session.device;
   els.btnTestMac.disabled = !session.sessionKey;
   els.btnExploreGatt.disabled = !session.server;
+  if (!controlsEnabled) stopMusicMode({ silent: true });
 }
 
 // --- power / color / brightness / white -----------------------------------
 
 let powerOn = false;
-
-// Shows the real cálido/frío slider only for the Livarno profile; the generic
-// profile (this lamp) controls white brightness with the main Brillo slider instead.
-function updateProfileUi() {
-  const isLivarno = currentProfile().key === 'livarno';
-  els.whiteTempRow.style.display = isLivarno ? '' : 'none';
-  els.whiteHint.style.display = isLivarno ? 'none' : '';
-}
 
 async function sendSafe(opcode, params, { quiet = false } = {}) {
   try {
@@ -197,49 +200,27 @@ function hexToRgb(hex) {
   return { r: (n >> 16) & 255, g: (n >> 8) & 255, b: n & 255 };
 }
 
-// --- Philco/Jingxun hardware note (see PROTOCOL.md) -------------------------
-// On this specific lamp OP_GENERIC_BRIGHTNESS (0xD2) doesn't work (it just makes the
-// lamp blink and snap back), and the "colour temperature" byte of 0xE2/0x05 is read
-// as a plain white-channel brightness (0-100, not inverted, no real warm/cool control).
-// So for the "generic" profile we never send 0xD2: brightness in colour mode is done by
-// scaling R/G/B before sending, and brightness in white mode goes through 0xE2/0x05
-// directly. The "livarno" profile is untouched — that firmware family genuinely has a
-// combined brightness+colour packet and real Y/W colour temperature.
+// Both profiles now use verified, independent opcodes for brightness/color/white —
+// see PROTOCOL.md "Opcodes verificados desde la app original". No more scaling hacks.
 
 async function applyColor(hex) {
   settings.lastColor = hex;
   settings.lastMode = 'color';
   Store.set('lastColor', hex);
   Store.set('lastMode', 'color');
+  els.colorPicker.value = hex;
   const { r, g, b } = hexToRgb(hex);
-  const brightness = Number(els.sliderBrightness.value);
   const prof = currentProfile();
-  let opcode, params;
-  if (prof.key === 'livarno') {
-    ({ opcode, params } = prof.rgb(r, g, b, brightness));
-  } else {
-    const scale = brightness / 100;
-    ({ opcode, params } = prof.rgb(Math.round(r * scale), Math.round(g * scale), Math.round(b * scale)));
-  }
+  const { opcode, params } =
+    prof.key === 'livarno' ? prof.rgb(r, g, b, Number(els.sliderBrightness.value)) : prof.rgb(r, g, b);
   await sendSafe(opcode, params, { quiet: true });
 }
 
 async function applyBrightness(value) {
   settings.lastBrightness = value;
   Store.set('lastBrightness', value);
-  const prof = currentProfile();
-  if (prof.key === 'livarno') {
-    const { opcode, params } = prof.brightness(value);
-    await sendSafe(opcode, params, { quiet: true });
-    return;
-  }
-  // Generic profile: re-apply whatever mode is active at the new brightness level.
-  if (settings.lastMode === 'white') {
-    const { opcode, params } = prof.whiteLevel(value);
-    await sendSafe(opcode, params, { quiet: true });
-  } else {
-    await applyColor(settings.lastColor);
-  }
+  const { opcode, params } = currentProfile().brightness(value);
+  await sendSafe(opcode, params, { quiet: true });
 }
 
 function whitePercentToKelvin(percent) {
@@ -248,29 +229,25 @@ function whitePercentToKelvin(percent) {
   return Math.round(prof.minKelvin + (percent / 100) * (prof.maxKelvin - prof.minKelvin));
 }
 
-// Livarno profile only: real warm/cool colour temperature via the cálido/frío slider.
 async function applyWhite(percent) {
   settings.lastWhite = percent;
   settings.lastMode = 'white';
   Store.set('lastWhite', percent);
   Store.set('lastMode', 'white');
-  const kelvin = whitePercentToKelvin(percent);
   const prof = currentProfile();
-  const { opcode, params } = prof.colorTemp(kelvin, {
-    minKelvin: prof.minKelvin,
-    maxKelvin: prof.maxKelvin,
-    brightness: Number(els.sliderBrightness.value),
-  });
+  let opcode, params;
+  if (prof.key === 'livarno') {
+    ({ opcode, params } = prof.colorTempKelvin(whitePercentToKelvin(percent), {
+      minKelvin: prof.minKelvin,
+      maxKelvin: prof.maxKelvin,
+      brightness: Number(els.sliderBrightness.value),
+    }));
+  } else {
+    ({ opcode, params } = prof.colorTemp(percent)); // percent: 0=cálido, 100=frío
+  }
   await sendSafe(opcode, params);
 }
 
-// Generic profile only: "blanco" is just the white channel at the current Brillo level.
-async function useWhiteGeneric() {
-  settings.lastMode = 'white';
-  Store.set('lastMode', 'white');
-  const { opcode, params } = currentProfile().whiteLevel(Number(els.sliderBrightness.value));
-  await sendSafe(opcode, params);
-}
 
 // throttle helper for slider dragging
 function throttled(fn, ms) {
@@ -295,19 +272,41 @@ const applyColorThrottled = throttled(applyColor, 90);
 const applyBrightnessThrottled = throttled(applyBrightness, 90);
 const applyWhiteThrottled = throttled(applyWhite, 90);
 
+// --- color wheel ------------------------------------------------------------
+
+let currentHue = 0;
+
+function setColorFromHue(hue, { commit = false } = {}) {
+  currentHue = hue;
+  const hex = hueToHex(hue);
+  settings.lastHue = hue;
+  Store.set('lastHue', hue);
+  if (commit) applyColor(hex);
+  else applyColorThrottled(hex);
+}
+
+const hueRing = createHueRing(
+  els.wheelWrap,
+  els.wheelRing,
+  els.wheelThumb,
+  (hue) => setColorFromHue(hue),
+  (hue) => setColorFromHue(hue, { commit: true })
+);
+
 // --- swatches ------------------------------------------------------------
 
 function renderColorSwatches() {
   els.swatchesColor.innerHTML = '';
-  for (const hex of PRESET_COLORS) {
+  for (const hue of PRESET_HUES) {
+    const hex = hueToHex(hue);
     const btn = document.createElement('button');
     btn.className = 'swatch';
     btn.style.background = hex;
     btn.disabled = !session.sessionKey;
     btn.title = hex;
     btn.addEventListener('click', () => {
-      els.colorPicker.value = hex;
-      applyColor(hex);
+      hueRing.setThumbForHue(hue);
+      setColorFromHue(hue, { commit: true });
     });
     els.swatchesColor.appendChild(btn);
   }
@@ -324,7 +323,8 @@ function renderFavorites() {
     btn.disabled = !session.sessionKey;
     btn.title = 'Tocar para aplicar · mantené presionado para borrar';
     btn.addEventListener('click', () => {
-      els.colorPicker.value = hex;
+      const { r, g, b } = hexToRgb(hex);
+      hueRing.setThumbForHue(rgbToHue(r, g, b));
       applyColor(hex);
     });
     let pressTimer;
@@ -355,10 +355,14 @@ els.sliderBrightness.addEventListener('input', () => {
 });
 els.sliderBrightness.addEventListener('change', () => applyBrightness(Number(els.sliderBrightness.value)));
 
-els.colorPicker.addEventListener('input', () => applyColorThrottled(els.colorPicker.value));
+els.colorPicker.addEventListener('input', () => {
+  const { r, g, b } = hexToRgb(els.colorPicker.value);
+  hueRing.setThumbForHue(rgbToHue(r, g, b));
+  applyColorThrottled(els.colorPicker.value);
+});
 els.colorPicker.addEventListener('change', () => applyColor(els.colorPicker.value));
 
-// Livarno profile only (hidden for "generic" — see updateProfileUi).
+// Perfil Livarno: usa colorTempKelvin (rango en Kelvin); perfil generic usa colorTemp(percent) directo.
 els.sliderWhite.addEventListener('input', () => {
   const v = Number(els.sliderWhite.value);
   els.sliderWhite.style.setProperty('--fill', v + '%');
@@ -366,10 +370,16 @@ els.sliderWhite.addEventListener('input', () => {
 });
 els.sliderWhite.addEventListener('change', () => applyWhite(Number(els.sliderWhite.value)));
 
-els.btnUseWhite.addEventListener('click', () => {
-  if (currentProfile().key === 'livarno') applyWhite(Number(els.sliderWhite.value));
-  else useWhiteGeneric();
-});
+els.btnUseWhite.addEventListener('click', () => applyWhite(Number(els.sliderWhite.value)));
+
+for (const btn of els.whitePresets.querySelectorAll('button[data-white]')) {
+  btn.addEventListener('click', () => {
+    const v = Number(btn.dataset.white);
+    els.sliderWhite.value = v;
+    els.sliderWhite.style.setProperty('--fill', v + '%');
+    applyWhite(v);
+  });
+}
 
 els.btnSaveFavorite.addEventListener('click', () => {
   const hex = els.colorPicker.value;
@@ -378,6 +388,83 @@ els.btnSaveFavorite.addEventListener('click', () => {
     Store.set('favorites', settings.favorites);
     renderFavorites();
   }
+});
+
+// --- luces rítmicas (modo música) --------------------------------------------
+//
+// Usa el micrófono del celular (no hace falta cargar un archivo): analiza el volumen
+// en tiempo real con la Web Audio API y manda el nivel + el color actual por opcode
+// 0xD2 (LIGHT_ADJUST_LUM), igual que hace la app original al reproducir una canción.
+// Ver PROTOCOL.md.
+
+const music = { active: false, stream: null, audioCtx: null, analyser: null, data: null, timer: null };
+
+function musicLevelFromAnalyser() {
+  music.analyser.getByteFrequencyData(music.data);
+  let max = 0;
+  for (let i = 0; i < music.data.length; i++) if (music.data[i] > max) max = music.data[i];
+  return Math.max(16, Math.min(100, Math.round((max / 128) * 100 + 1)));
+}
+
+async function startMusicMode() {
+  if (music.active) return;
+  try {
+    music.stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+  } catch (err) {
+    setStatus('No se pudo acceder al micrófono: ' + err.message);
+    return;
+  }
+  const AudioCtx = window.AudioContext || window.webkitAudioContext;
+  music.audioCtx = new AudioCtx();
+  const source = music.audioCtx.createMediaStreamSource(music.stream);
+  music.analyser = music.audioCtx.createAnalyser();
+  music.analyser.fftSize = 256;
+  music.data = new Uint8Array(music.analyser.frequencyBinCount);
+  source.connect(music.analyser);
+
+  const { opcode: enterOp, params: enterParams } = currentProfile().musicEnter();
+  await sendSafe(enterOp, enterParams);
+  music.active = true;
+  els.btnMusicToggle.textContent = 'Detener';
+  els.btnMusicToggle.classList.add('btn-danger');
+  els.btnMusicToggle.classList.remove('btn-ghost');
+
+  music.timer = setInterval(async () => {
+    if (!music.active) return;
+    const level = musicLevelFromAnalyser();
+    els.musicMeterFill.style.width = level + '%';
+    const { r, g, b } = hexToRgb(els.colorPicker.value);
+    const { opcode, params } = currentProfile().musicFrame(level, r, g, b);
+    await sendSafe(opcode, params, { quiet: true });
+  }, 160);
+}
+
+async function stopMusicMode({ silent = false } = {}) {
+  if (!music.active) return;
+  music.active = false;
+  clearInterval(music.timer);
+  music.timer = null;
+  music.stream?.getTracks().forEach((t) => t.stop());
+  music.stream = null;
+  try {
+    await music.audioCtx?.close();
+  } catch {
+    /* ignore */
+  }
+  music.audioCtx = null;
+  els.musicMeterFill.style.width = '0%';
+  els.btnMusicToggle.textContent = 'Escuchar micrófono';
+  els.btnMusicToggle.classList.remove('btn-danger');
+  els.btnMusicToggle.classList.add('btn-ghost');
+  if (!silent && session.sessionKey) {
+    const { opcode, params } = currentProfile().musicExit();
+    await sendSafe(opcode, params, { quiet: true });
+  }
+}
+
+els.btnMusicToggle.addEventListener('click', () => {
+  if (music.active) stopMusicMode();
+  else startMusicMode();
 });
 
 // --- diagnostics tab ------------------------------------------------------------
@@ -439,7 +526,6 @@ els.btnTryLogin.addEventListener('click', async () => {
     Store.set('meshPassword', settings.meshPassword);
     Store.set('profile', settings.profile);
     syncSettingsFields();
-    updateProfileUi();
     await session.enableNotifications();
     logDiag(`Notificaciones: ${session.notificationsEnabled ? 'activadas' : 'no disponibles (igual se puede controlar)'}`);
     if (settings.mac) {
@@ -520,7 +606,6 @@ els.btnSaveSettings.addEventListener('click', () => {
   settings.mac = els.setMac.value.trim() || null;
   for (const k of ['meshName', 'meshPassword', 'profile', 'minKelvin', 'maxKelvin', 'mac']) Store.set(k, settings[k]);
   if (settings.mac) session.setMac(settings.mac);
-  updateProfileUi();
   setStatus('Ajustes guardados.');
 });
 
@@ -530,7 +615,6 @@ els.btnForget.addEventListener('click', async () => {
   for (const k of Object.keys(defaults)) Store.remove(k);
   settings = loadSettings();
   syncSettingsFields();
-  updateProfileUi();
   renderFavorites();
   setConnectionUi();
   setStatus('Datos borrados. Volvé a buscar la lámpara desde Diagnóstico.');
@@ -579,7 +663,6 @@ async function runConnectSequence() {
   Store.set('meshPassword', settings.meshPassword);
   Store.set('profile', settings.profile);
   syncSettingsFields();
-  updateProfileUi();
   await session.enableNotifications();
   if (!settings.mac) {
     setStatus('Conectado, pero falta configurar la MAC. Andá a la pestaña Diagnóstico (paso 3).');
@@ -603,10 +686,11 @@ function applyStoredUiState() {
   els.brightnessValue.textContent = settings.lastBrightness + '%';
   els.sliderBrightness.style.setProperty('--fill', settings.lastBrightness + '%');
   els.colorPicker.value = settings.lastColor;
+  currentHue = Number(settings.lastHue) || 0;
+  hueRing.setThumbForHue(currentHue);
   els.sliderWhite.value = settings.lastWhite;
   els.sliderWhite.style.setProperty('--fill', settings.lastWhite + '%');
   syncSettingsFields();
-  updateProfileUi();
   renderColorSwatches();
   renderFavorites();
 }

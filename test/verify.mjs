@@ -195,45 +195,63 @@ test('parseOnlineStatus: on + dimmed entries (Fulife capture)', () => {
   assert.equal(e.brightness, 0x37);
 });
 
-// --- profile byte-output tests, matching test_protocol.py::ProfileTests -----
+// --- profile byte-output tests -----
+// GenericProfile opcodes/subcommands below are transcribed from the decompiled
+// official app (index.android.bundle), not guessed — see PROTOCOL.md.
 
-test('GenericProfile matches Python ProfileTests.test_generic', () => {
+test('GenericProfile power/rgb/brightness use the verified opcodes', () => {
   const prof = getProfile('generic');
   let r = prof.power(false);
   assert.equal(r.opcode, 0xd0);
   bytesEq(r.params, [0, 0, 0]);
-  r = prof.brightness(42);
-  assert.equal(r.opcode, 0xd2);
-  bytesEq(r.params, [0x2a]);
   r = prof.rgb(1, 2, 3);
   assert.equal(r.opcode, 0xe2);
-  bytesEq(r.params, [4, 1, 2, 3]);
+  bytesEq(r.params, [4, 1, 2, 3]); // LIGHT_ADJUST.COLOR_RGB = 4
+  r = prof.brightness(42);
+  assert.equal(r.opcode, 0xe2);
+  bytesEq(r.params, [5, 42]); // LIGHT_ADJUST.BRIGHTNESS = 5 (NOT opcode 0xD2)
 });
 
-test('GenericProfile color_temp matches Python test_generic_color_temp_inverted_3000_6000', () => {
+test('GenericProfile.colorTempDivided sends raw cold/warm bytes under subcommand 6', () => {
   const prof = getProfile('generic');
-  assert.equal(prof.minKelvin, 3000);
-  assert.equal(prof.maxKelvin, 6000);
-  bytesEq(prof.colorTemp(6000).params, [5, 0]);
-  bytesEq(prof.colorTemp(3000).params, [5, 100]);
-  bytesEq(prof.colorTemp(4500).params, [5, 50]);
-  bytesEq(prof.colorTemp(6500).params, [5, 0]); // clamps
-  bytesEq(prof.colorTemp(2700).params, [5, 100]); // clamps
+  const r = prof.colorTempDivided(200, 30);
+  assert.equal(r.opcode, 0xe2);
+  bytesEq(r.params, [6, 200, 30]); // LIGHT_ADJUST.COLOR_TEMP = 6
 });
 
-test('GenericProfile color_temp override range matches Python test', () => {
+test('GenericProfile.colorTemp(percent) matches the official app\'s own conversion (t/100*255, 255-t)', () => {
   const prof = getProfile('generic');
-  bytesEq(prof.colorTemp(7000, { minKelvin: 2000, maxKelvin: 7000 }).params, [5, 0]);
-  bytesEq(prof.colorTemp(2000, { minKelvin: 2000, maxKelvin: 7000 }).params, [5, 100]);
-  bytesEq(prof.colorTemp(4500, { minKelvin: 2000, maxKelvin: 7000 }).params, [5, 50]);
+  bytesEq(prof.colorTemp(0).params, [6, 0, 255]); // warmest
+  bytesEq(prof.colorTemp(100).params, [6, 255, 0]); // coldest
+  bytesEq(prof.colorTemp(50).params, [6, 128, 127]);
+  bytesEq(prof.colorTemp(150).params, [6, 255, 0]); // clamps
 });
 
-test('GenericProfile.whiteLevel sends opcode 0xE2/0x05 as a plain 0-100 level', () => {
+test('GenericProfile.rgbcw and .all use subcommands 9 and 0', () => {
   const prof = getProfile('generic');
-  bytesEq(prof.whiteLevel(0).params, [5, 0]);
-  bytesEq(prof.whiteLevel(100).params, [5, 100]);
-  bytesEq(prof.whiteLevel(37).params, [5, 37]);
-  bytesEq(prof.whiteLevel(150).params, [5, 100]); // clamps
+  bytesEq(prof.rgbcw(1, 2, 3, 4, 5).params, [9, 1, 2, 3, 4, 5]);
+  bytesEq(prof.all(1, 2, 3, 4, 5, 60).params, [0, 1, 2, 3, 4, 5, 60]);
+});
+
+test('GenericProfile music mode: enter=[254], exit=[255], frame=[level,R,G,B,0] on opcode 0xD2', () => {
+  const prof = getProfile('generic');
+  let r = prof.musicEnter();
+  assert.equal(r.opcode, 0xd2);
+  bytesEq(r.params, [254]);
+  r = prof.musicExit();
+  assert.equal(r.opcode, 0xd2);
+  bytesEq(r.params, [255]);
+  r = prof.musicFrame(50, 10, 20, 30);
+  assert.equal(r.opcode, 0xd2);
+  bytesEq(r.params, [50, 10, 20, 30, 0]);
+  bytesEq(prof.musicFrame(5, 0, 0, 0).params, [16, 0, 0, 0, 0]); // clamps to [16,100]
+  bytesEq(prof.musicFrame(500, 0, 0, 0).params, [100, 0, 0, 0, 0]);
+});
+
+test('GenericProfile.resetDevice uses opcode 0xE3 param [1]', () => {
+  const r = getProfile('generic').resetDevice();
+  assert.equal(r.opcode, 0xe3);
+  bytesEq(r.params, [1]);
 });
 
 test('LivarnoProfile matches Python ProfileTests.test_livarno', () => {
@@ -246,13 +264,13 @@ test('LivarnoProfile matches Python ProfileTests.test_livarno', () => {
   bytesEq(r.params, [100, 0, 0, 0, 0, 0, 0, 1]);
   r = prof.rgb(1, 2, 3, 0);
   bytesEq(r.params, [1, 1, 2, 3, 0, 0, 0, 0]);
-  r = prof.colorTemp(2700, { brightness: 50 });
+  r = prof.colorTempKelvin(2700, { brightness: 50 });
   bytesEq(r.params, [50, 0, 0, 0, 255, 0, 0, 0]);
 });
 
-test('kelvin_to_yw matches telinkpp test vectors (via LivarnoProfile.colorTemp)', () => {
+test('kelvin_to_yw matches telinkpp test vectors (via LivarnoProfile.colorTempKelvin)', () => {
   const prof = getProfile('livarno');
-  const yw = (k) => Array.from(prof.colorTemp(k, { brightness: 1 }).params.slice(4, 6));
+  const yw = (k) => Array.from(prof.colorTempKelvin(k, { brightness: 1 }).params.slice(4, 6));
   assert.deepEqual(yw(2700), [255, 0]);
   assert.deepEqual(yw(4600), [255, 255]);
   assert.deepEqual(yw(6500), [0, 255]);

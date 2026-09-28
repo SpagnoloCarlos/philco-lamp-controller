@@ -59,15 +59,22 @@
 
     <div class="card">
       <div class="field-label-row">
-        <label class="field-label">Color</label>
-        <input type="color" id="colorPicker" value="#ff9d3c" disabled />
+        <label class="field-label">Paleta</label>
+        <input type="color" id="colorPicker" value="#ff0000" disabled title="Color exacto (alternativa a la rueda)" />
+      </div>
+      <div class="wheel-outer">
+        <div class="wheel-wrap" id="wheelWrap" data-disabled="true">
+          <div class="wheel-ring" id="wheelRing"></div>
+          <div class="wheel-center" id="wheelCenter"></div>
+          <div class="wheel-thumb" id="wheelThumb"></div>
+        </div>
       </div>
       <div class="swatches" id="swatchesColor"></div>
     </div>
 
     <div class="card">
       <div class="field-label-row">
-        <label class="field-label" for="sliderWhite">Blanco</label>
+        <label class="field-label" for="sliderWhite">Blanco (temperatura)</label>
         <button id="btnUseWhite" class="btn btn-ghost btn-small" disabled>Usar blanco</button>
       </div>
       <div class="slider-row white-slider" id="whiteTempRow">
@@ -75,7 +82,24 @@
         <input type="range" id="sliderWhite" min="0" max="100" value="50" disabled />
         <span class="temp-end">Frío</span>
       </div>
-      <p class="hint" id="whiteHint">El brillo del blanco se controla con el slider de Brillo de arriba.</p>
+      <div class="btn-row" id="whitePresets">
+        <button class="btn btn-ghost btn-small" data-white="0" disabled>Cálido</button>
+        <button class="btn btn-ghost btn-small" data-white="33" disabled>Neutro cálido</button>
+        <button class="btn btn-ghost btn-small" data-white="66" disabled>Neutro frío</button>
+        <button class="btn btn-ghost btn-small" data-white="100" disabled>Frío</button>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="field-label-row">
+        <label class="field-label">Luces rítmicas</label>
+        <button id="btnMusicToggle" class="btn btn-ghost btn-small" disabled>Escuchar micrófono</button>
+      </div>
+      <div class="music-meter" id="musicMeter"><div class="music-meter-fill" id="musicMeterFill"></div></div>
+      <p class="hint" id="musicHint">
+        Usa el micrófono del celular para que la lámpara pulse con el volumen de la música que estés escuchando (del
+        color elegido en Paleta). No hace falta cargar ningún archivo.
+      </p>
     </div>
 
     <div class="card">

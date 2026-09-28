@@ -6,7 +6,11 @@ habla directo con la lámpara por **Web Bluetooth**.
 
 Requiere **Chrome o Edge** (Android o PC con Bluetooth). **No funciona en iPhone/Safari**
 (Web Bluetooth no está soportado ahí). Ver `PROTOCOL.md` para el detalle técnico del
-protocolo (Telink BLE Mesh v1) y sus fuentes.
+protocolo (Telink BLE Mesh v1, opcodes verificados desde la app original) y sus fuentes.
+
+**Funciones:** encender/apagar, brillo, rueda de color (paleta + 12 colores
+predeterminados), blanco con temperatura cálido/frío real, favoritos, y luces
+rítmicas que pulsan con el micrófono del celular al ritmo de la música.
 
 ## Probarla desde el celular (durante desarrollo)
 
@@ -58,10 +62,11 @@ querés que lo prepare (inicializar el repo git, etc.).
 ```
 index.html, styles.css        interfaz
 js/telink-crypto.js           cifrado/protocolo Telink Mesh (con tests, ver PROTOCOL.md)
-js/telink-profiles.js         mapeo encendido/brillo/color/blanco → comandos
+js/telink-profiles.js         mapeo encendido/brillo/color/blanco/música → comandos
+js/color-wheel.js             rueda de color (selector de tono tipo anillo)
 js/ble.js                     transporte Web Bluetooth
-js/app.js                     estado de la UI, ajustes, flujo de conexión
-manifest.webmanifest, sw.js   PWA instalable / caché offline del shell
+js/app.js                     estado de la UI, ajustes, flujo de conexión, modo música
+manifest.webmanifest, sw.js   PWA instalable / caché offline del shell (network-first)
 test/verify.mjs               valida el protocolo contra vectores de test reales
 server.mjs                    servidor estático mínimo para pruebas locales
 ```
@@ -69,8 +74,12 @@ server.mjs                    servidor estático mínimo para pruebas locales
 ## Si no responde
 
 - Perfil equivocado: en Ajustes, probar el perfil "Livarno / Briloner" en vez del
-  genérico.
-- Rango de blanco raro: ajustar los Kelvin mín/máx en Ajustes.
-- La lámpara ya fue emparejada por la app vieja (no está en modo fábrica): resetearla
-  (suele ser apagar/prender varias veces seguidas con la llave de luz — revisar el
-  manual en papel) para volver a las credenciales por defecto.
+  genérico (el genérico ya trae los opcodes verificados de esta lámpara).
+- Luces rítmicas: pide permiso de micrófono la primera vez — si lo rechazaste, hay que
+  habilitarlo desde el ícono de candado/sitio en Chrome y recargar.
+- La lámpara ya fue emparejada por la app vieja o por esta misma (no está en modo
+  fábrica): resetearla desde la llave de luz — 3 ciclos de menos de 2 seg seguidos de
+  2 ciclos de más de 5 seg (revisar el manual en papel) — para volver a las
+  credenciales por defecto. Si dejó de aceptarlas incluso después del reset, puede que
+  el firmware ya no vuelva a modo fábrica solo con esa secuencia; ver la nota al final
+  de `PROTOCOL.md`.

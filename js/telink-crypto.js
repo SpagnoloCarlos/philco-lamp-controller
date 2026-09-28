@@ -23,15 +23,33 @@ export const VENDOR_ID = 0x0211;
 export const ADDR_CONNECTED = 0x0000; // the node we are connected to
 export const ADDR_ALL = 0xffff;
 
-// Opcodes of the generic Telink mesh light SDK (python-dimond / python-tikteck /
-// "Fulife" / "Mesh Lamp" / V-TAC style firmware). Verified on real hardware upstream.
-export const OP_GENERIC_ON_OFF = 0xd0;
-export const OP_GENERIC_BRIGHTNESS = 0xd2;
-export const OP_GENERIC_COLOR = 0xe2;
-export const OP_STATUS_QUERY = 0xda;
-export const OP_STATUS_REPORT = 0xdb;
-export const OP_ONLINE_STATUS = 0xdc;
-export const OP_ADDRESS_REPORT = 0xe1;
+// Opcodes verified straight from the decompiled official Philco Smart Color app
+// (Jingxun's Telink-based React Native SDK — see PROTOCOL.md). These replace an
+// earlier guess ported from a generic reference project; in particular 0xD2 is NOT
+// "brightness" on this firmware (it's the music-mode opcode) and colour temperature
+// lives at subcommand 0x06 of 0xE2, not 0x05 (that's the real brightness subcommand).
+export const OP_GENERIC_ON_OFF = 0xd0; // Command.POWER
+export const OP_LIGHT_ADJUST_LUM = 0xd2; // Command.LIGHT_ADJUST_LUM — music/rhythm mode only
+export const OP_STATUS_QUERY = 0xda; // Command.STATUS_QUERY
+export const OP_ONLINE_STATUS = 0xdc; // Command.STATUS_REPORT
+export const OP_ADDRESS_REPORT = 0xe1; // AssignAddress response
+export const OP_LIGHT_ADJUST = 0xe2; // Command.LIGHT_ADJUST — power/colour/brightness state
+export const OP_RESET_DEVICE = 0xe3; // Command.RESET_DEVICE
+
+// AddOns.LIGHT_ADJUST — subcommand byte (params[0]) under OP_LIGHT_ADJUST (0xE2).
+export const LIGHT_ADJUST = {
+  ALL: 0,
+  COLOR_RGB: 4,
+  BRIGHTNESS: 5,
+  COLOR_TEMP: 6,
+  COLOR_TEMP_AND_BRIGHTNESS: 7,
+  COLOR_RGB_AND_BRIGHTNESS: 8,
+  COLOR_RGBCW: 9,
+};
+
+// Deprecated aliases kept only so nothing else in the codebase breaks; new code
+// should use OP_LIGHT_ADJUST / LIGHT_ADJUST above.
+export const OP_GENERIC_COLOR = OP_LIGHT_ADJUST;
 
 // Opcodes of the Lidl Livarno LUX / Briloner style firmware (telinkpp).
 export const OP_LIVARNO_ON_OFF = 0xf0;

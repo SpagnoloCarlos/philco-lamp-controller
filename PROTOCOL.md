@@ -102,45 +102,70 @@ Android). Por eso la pestaña **Diagnóstico** pide la MAC:
   **nRF Connect** en Android, que sí puede leer la MAC real) y se verifica con el botón
   "Probar" (hace parpadear la lámpara).
 
-## Opcodes (perfil "genérico" — Fulife / Mesh Lamp / V-TAC)
+## Opcodes verificados desde la app original (perfil `generic`)
 
-| Función | Opcode | Parámetros |
-|---|---|---|
-| Encender/apagar | `0xD0` | `[1\|0, 0, 0]` |
-| Brillo | `0xD2` | `[brillo 0-100]` |
-| Color RGB | `0xE2` | `[0x04, R, G, B]` |
-| Blanco (temperatura) | `0xE2` | `[0x05, porcentaje]` — invertido: 0=frío (6000K), 100=cálido (3000K) |
-| Estado online (notificación) | `0xDC` | 4 bytes por nodo: `[id, seq, brillo, reservado]` |
+La primera versión de este documento asumía los opcodes "genéricos" de
+`ha-telink-mesh` (pensados para lámparas Fulife/Mesh Lamp). Probando contra una
+Philco Smart Color real hubo comportamientos raros (brillo que solo hacía parpadear
+la lámpara, "temperatura de color" que en realidad movía el brillo) — así que en vez
+de seguir adivinando, se **decompiló el APK original** (`Philco Smart Color`
+v1.6.292, paquete `com.jingxun.smarthome.tospo_philco`, con `jadx`) y se extrajeron
+los opcodes reales de su bundle de React Native (`assets/index.android.bundle`),
+cruzados contra el SDK nativo de Telink que trae empaquetado
+(`com/telink/bluetooth/light/LightController.java`, etc.). La tabla de abajo es la
+real, no una suposición:
+
+| Función | Opcode (`Command`) | Subcomando (`AddOns`) | Parámetros |
+|---|---|---|---|
+| Encender/apagar | `0xD0` (`POWER`) | `0`=OFF, `1`=ON | `[on, delayLow, delayHigh]` |
+| Brillo | `0xE2` (`LIGHT_ADJUST`) | `5` (`BRIGHTNESS`) | `[5, brillo 0-100]` |
+| Color RGB | `0xE2` | `4` (`COLOR_RGB`) | `[4, R, G, B]` |
+| Temperatura de color | `0xE2` | `6` (`COLOR_TEMP`) | `[6, blancoFrío 0-255, blancoCálido 0-255]` |
+| RGB + blanco frío/cálido | `0xE2` | `9` (`COLOR_RGBCW`) | `[9, R, G, B, frío, cálido]` |
+| Todo junto | `0xE2` | `0` (`ALL`) | `[0, R, G, B, frío, cálido, brillo]` |
+| Reset de red (requiere estar logueado) | `0xE3` (`RESET_DEVICE`) | — | `[1]` |
+| Modo música — entrar/salir | `0xD2` (`LIGHT_ADJUST_LUM`) | — | `[254]` entrar, `[255]` salir |
+| Modo música — cada cuadro | `0xD2` | — | `[nivel 16-100, R, G, B, 0]` |
+| Estado online (notificación) | `0xDC` (`STATUS_REPORT`) | — | 4 bytes por nodo: `[id, seq, brillo, reservado]` |
+
+Detalles importantes que explican los síntomas anteriores:
+
+- **`0xD2` nunca fue "brillo".** Es el opcode `LIGHT_ADJUST_LUM`, exclusivo del modo
+  música. Mandarle un byte de brillo cualquiera (como hacía la v1 de esta app, copiando
+  el perfil genérico de `ha-telink-mesh`) lo interpreta como un cuadro de música mal
+  formado → la lámpara hace un resync visible (parpadeo) sin aplicar nada.
+- **El brillo real está en `0xE2` subcomando `5`, no en `0xD2`.** Resulta que el valor
+  que antes mandábamos como "temperatura de color" (`0xE2`, `[0x05, ...]`) en realidad
+  era brillo — por eso el slider cálido/frío movía la intensidad en vez del tono.
+- **La temperatura de color real es el subcomando `6`**, con dos bytes independientes
+  (blanco frío 0-255, blanco cálido 0-255) — sí soporta cálido/frío real, contra lo que
+  se había concluido antes. La app original convierte un slider 0-100 así:
+  `frío = round(pct/100*255)`, `cálido = 255 - frío` (0% = full cálido, 100% = full frío).
+- **Modo música**: la app arma un frame `[nivel, R, G, B, 0]` cada ~160 ms mientras
+  escucha el micrófono, donde `nivel` sale de la banda de frecuencia más fuerte
+  (`round(maxByte/128*100 + 1)`, acotado a `[16, 100]`) y R/G/B es el color
+  seleccionado en la rueda (no cambia con la música, solo el brillo pulsa).
+
+`js/telink-crypto.js` (constantes `OP_LIGHT_ADJUST`, `LIGHT_ADJUST.*`,
+`OP_LIGHT_ADJUST_LUM`, `OP_RESET_DEVICE`) y `js/telink-profiles.js`
+(`GenericProfile`) implementan esta tabla tal cual, con tests en
+`test/verify.mjs` para cada opcode.
 
 También existe un perfil `livarno` (Lidl Livarno/Briloner, opcodes `0xF0`/`0xF1`, con
-brillo+color combinados en un solo paquete y rango 2700-6500K) por si el genérico no
-encaja — seleccionable en Ajustes.
-
-## Notas específicas de la lámpara Philco (confirmado en hardware real)
-
-Probando contra una Philco Smart Color real (perfil `generic`, factory reset), dos
-cosas se comportan distinto de lo que documenta `ha-telink-mesh` para la familia
-"Fulife/Mesh Lamp":
-
-- **`OP_GENERIC_BRIGHTNESS` (`0xD2`) no funciona.** Enviarlo hace que la lámpara
-  parpadee (se apaga un instante y vuelve a prender con el mismo brillo) sin aplicar
-  el valor — el firmware lo trata como un comando inválido y hace un resync de
-  estado, no como brillo. La app **no lo usa** para el perfil genérico.
-- **El segundo byte de `0xE2`/`0x05` no es temperatura de color — es brillo del canal
-  blanco en crudo**, `0-100`, sin invertir (`0` = apagado, `100` = máximo). No hay
-  control real de blanco cálido/frío vía este opcode en esta lámpara (probablemente
-  el bulbo tiene un solo LED blanco, no dos como las Fulife CCT).
-
-Por eso, para el perfil `generic`, `js/telink-profiles.js` expone `whiteLevel(percent)`
-(`[0x05, percent]` directo) en vez de `colorTemp()`, y el brillo en modo color se
-resuelve **escalando R/G/B** antes de mandarlos por `0xE2/0x04`, en vez de mandar
-`0xD2`. `js/app.js` (`updateProfileUi()`) oculta el slider cálido/frío para este
-perfil y deja que el slider de Brillo controle el blanco también. El perfil `livarno`
-no se tocó — esa familia sí tiene brillo+color combinados y CCT real por diseño.
+brillo+color combinados en un solo paquete y CCT vía canales Y/W) sin tocar, por si
+algún día hace falta para otro producto — seleccionable en Ajustes.
 
 ## Fuentes
 
 - https://github.com/kernelorg/ha-telink-mesh (protocol.py, test_protocol.py, const.py)
-- https://github.com/vik-pfqld/blisslights-telink-ha (PROTOCOL.md)
+  — base del cifrado/handshake (login, sesión, cifrado de paquetes); los opcodes de
+  control de luz de ese proyecto quedaron reemplazados por los de arriba.
+- https://github.com/vik-pfqld/blisslights-telink-ha (PROTOCOL.md) — segunda fuente
+  para verificar el cifrado byte a byte.
 - https://github.com/vpaeder/telinkpp
 - python-dimond (Google, Apache-2.0) — referencia original del handshake/cifrado
+- **APK oficial "Philco Smart Color" v1.6.292** (`com.jingxun.smarthome.tospo_philco`,
+  Newsan/Jingxun), decompilado con `jadx` — fuente de la tabla de opcodes de arriba
+  (`assets/index.android.bundle` + `com/telink/bluetooth/light/*.java`). No se
+  redistribuye el APK ni el código decompilado en este repo, solo lo que se aprendió
+  de él.
