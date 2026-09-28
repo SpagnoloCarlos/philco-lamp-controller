@@ -1,6 +1,10 @@
 // Minimal offline app-shell cache so the PWA opens even with no signal
 // (Bluetooth itself obviously still needs the lamp nearby, not the network).
-const CACHE = 'philco-smart-color-v1';
+//
+// Network-first: always try the network so updates show up immediately; only fall
+// back to the cached copy when there's no connection. Bump CACHE whenever the asset
+// list changes so old installs purge their stale cache on the next activate.
+const CACHE = 'philco-smart-color-v2';
 const ASSETS = [
   './',
   './index.html',
@@ -30,16 +34,12 @@ self.addEventListener('activate', (event) => {
 self.addEventListener('fetch', (event) => {
   if (event.request.method !== 'GET') return;
   event.respondWith(
-    caches.match(event.request).then(
-      (cached) =>
-        cached ||
-        fetch(event.request)
-          .then((response) => {
-            const copy = response.clone();
-            caches.open(CACHE).then((cache) => cache.put(event.request, copy));
-            return response;
-          })
-          .catch(() => cached)
-    )
+    fetch(event.request)
+      .then((response) => {
+        const copy = response.clone();
+        caches.open(CACHE).then((cache) => cache.put(event.request, copy));
+        return response;
+      })
+      .catch(() => caches.match(event.request))
   );
 });
