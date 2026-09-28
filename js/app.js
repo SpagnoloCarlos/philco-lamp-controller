@@ -427,8 +427,10 @@ els.btnTryLogin.addEventListener('click', async () => {
   els.loginPresetsLog.innerHTML = '';
   els.btnTryLogin.disabled = true;
   try {
-    const preset = await session.loginWithPresets(presetList(), (p) => logDiag(`Probando ${p.label}…`));
-    renderLoginAttempt(preset, true);
+    const preset = await session.loginWithPresets(presetList(), (p, ok, err) => {
+      renderLoginAttempt(p, ok, err?.message);
+      logDiag(ok ? `"${p.label}" — OK` : `"${p.label}" — ${err?.message || 'falló'}`);
+    });
     logDiag(`Login OK con "${preset.label}".`);
     settings.meshName = preset.name;
     settings.meshPassword = preset.password;
@@ -450,9 +452,8 @@ els.btnTryLogin.addEventListener('click', async () => {
     setConnectionUi();
     els.btnTestMac.disabled = false;
   } catch (err) {
-    for (const p of presetList()) renderLoginAttempt(p, false);
-    logDiag(`Ninguna credencial funcionó: ${err.message}`);
-    setStatus('No se pudo iniciar sesión con las credenciales conocidas. Probá una manual.');
+    logDiag(`Ninguna credencial funcionó. Último error: ${err.message}`);
+    setStatus(`No se pudo iniciar sesión: ${err.message}`);
   } finally {
     els.btnTryLogin.disabled = false;
   }

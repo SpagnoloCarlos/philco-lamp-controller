@@ -103,16 +103,21 @@ export class TelinkSession extends EventTarget {
     return true;
   }
 
-  /** Tries a list of {name, password, profile, label} presets in order; returns the one that logged in. */
-  async loginWithPresets(presets, onAttempt) {
+  /**
+   * Tries a list of {name, password, profile, label} presets in order; returns the
+   * one that logged in. `onResult(preset, ok, error)` fires after each attempt (error
+   * is null on success) so the caller can show the real failure reason, not just "failed".
+   */
+  async loginWithPresets(presets, onResult) {
     let lastErr = new Error('sin credenciales para probar');
     for (const preset of presets) {
-      onAttempt?.(preset);
       try {
         await this.login(preset.name, preset.password);
+        onResult?.(preset, true, null);
         return preset;
       } catch (err) {
         lastErr = err;
+        onResult?.(preset, false, err);
       }
     }
     throw lastErr;
