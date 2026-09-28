@@ -41,6 +41,15 @@ export const GenericProfile = {
     const percent = Math.round(((hi - k) * 100) / (hi - lo));
     return { opcode: OP_GENERIC_COLOR, params: new Uint8Array([0x05, percent]) };
   },
+  // On the Philco Smart Color / Jingxun firmware (confirmed on real hardware), the
+  // second byte of opcode 0xE2/0x05 is NOT a colour-temperature percentage — it's read
+  // straight as a brightness level for the white channel (0 = off, 100 = max, no
+  // inversion). OP_GENERIC_BRIGHTNESS (0xD2) is also not real brightness here: sending
+  // it just makes the lamp blink off/on and snap back, so we never use it. See
+  // PROTOCOL.md "Notas específicas de la lámpara Philco" for the write-up.
+  whiteLevel(percent) {
+    return { opcode: OP_GENERIC_COLOR, params: new Uint8Array([0x05, clampBrightness(percent)]) };
+  },
 };
 
 export const LivarnoProfile = {

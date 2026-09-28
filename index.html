@@ -67,14 +67,15 @@
 
     <div class="card">
       <div class="field-label-row">
-        <label class="field-label" for="sliderWhite">Blanco (temperatura)</label>
+        <label class="field-label" for="sliderWhite">Blanco</label>
         <button id="btnUseWhite" class="btn btn-ghost btn-small" disabled>Usar blanco</button>
       </div>
-      <div class="slider-row white-slider">
+      <div class="slider-row white-slider" id="whiteTempRow">
         <span class="temp-end">Cálido</span>
         <input type="range" id="sliderWhite" min="0" max="100" value="50" disabled />
         <span class="temp-end">Frío</span>
       </div>
+      <p class="hint" id="whiteHint">El brillo del blanco se controla con el slider de Brillo de arriba.</p>
     </div>
 
     <div class="card">

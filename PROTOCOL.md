@@ -116,6 +116,28 @@ También existe un perfil `livarno` (Lidl Livarno/Briloner, opcodes `0xF0`/`0xF1
 brillo+color combinados en un solo paquete y rango 2700-6500K) por si el genérico no
 encaja — seleccionable en Ajustes.
 
+## Notas específicas de la lámpara Philco (confirmado en hardware real)
+
+Probando contra una Philco Smart Color real (perfil `generic`, factory reset), dos
+cosas se comportan distinto de lo que documenta `ha-telink-mesh` para la familia
+"Fulife/Mesh Lamp":
+
+- **`OP_GENERIC_BRIGHTNESS` (`0xD2`) no funciona.** Enviarlo hace que la lámpara
+  parpadee (se apaga un instante y vuelve a prender con el mismo brillo) sin aplicar
+  el valor — el firmware lo trata como un comando inválido y hace un resync de
+  estado, no como brillo. La app **no lo usa** para el perfil genérico.
+- **El segundo byte de `0xE2`/`0x05` no es temperatura de color — es brillo del canal
+  blanco en crudo**, `0-100`, sin invertir (`0` = apagado, `100` = máximo). No hay
+  control real de blanco cálido/frío vía este opcode en esta lámpara (probablemente
+  el bulbo tiene un solo LED blanco, no dos como las Fulife CCT).
+
+Por eso, para el perfil `generic`, `js/telink-profiles.js` expone `whiteLevel(percent)`
+(`[0x05, percent]` directo) en vez de `colorTemp()`, y el brillo en modo color se
+resuelve **escalando R/G/B** antes de mandarlos por `0xE2/0x04`, en vez de mandar
+`0xD2`. `js/app.js` (`updateProfileUi()`) oculta el slider cálido/frío para este
+perfil y deja que el slider de Brillo controle el blanco también. El perfil `livarno`
+no se tocó — esa familia sí tiene brillo+color combinados y CCT real por diseño.
+
 ## Fuentes
 
 - https://github.com/kernelorg/ha-telink-mesh (protocol.py, test_protocol.py, const.py)

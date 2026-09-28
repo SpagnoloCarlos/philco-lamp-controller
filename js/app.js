@@ -75,6 +75,8 @@ const els = {
   colorPicker: $('colorPicker'),
   swatchesColor: $('swatchesColor'),
   sliderWhite: $('sliderWhite'),
+  whiteTempRow: $('whiteTempRow'),
+  whiteHint: $('whiteHint'),
   btnUseWhite: $('btnUseWhite'),
   btnSaveFavorite: $('btnSaveFavorite'),
   swatchesFavorites: $('swatchesFavorites'),
@@ -164,6 +166,14 @@ function setConnectionUi(state) {
 
 let powerOn = false;
 
+// Shows the real cálido/frío slider only for the Livarno profile; the generic
+// profile (this lamp) controls white brightness with the main Brillo slider instead.
+function updateProfileUi() {
+  const isLivarno = currentProfile().key === 'livarno';
+  els.whiteTempRow.style.display = isLivarno ? '' : 'none';
+  els.whiteHint.style.display = isLivarno ? 'none' : '';
+}
+
 async function sendSafe(opcode, params, { quiet = false } = {}) {
   try {
     await session.send(opcode, params);
@@ -187,21 +197,49 @@ function hexToRgb(hex) {
   return { r: (n >> 16) & 255, g: (n >> 8) & 255, b: n & 255 };
 }
 
+// --- Philco/Jingxun hardware note (see PROTOCOL.md) -------------------------
+// On this specific lamp OP_GENERIC_BRIGHTNESS (0xD2) doesn't work (it just makes the
+// lamp blink and snap back), and the "colour temperature" byte of 0xE2/0x05 is read
+// as a plain white-channel brightness (0-100, not inverted, no real warm/cool control).
+// So for the "generic" profile we never send 0xD2: brightness in colour mode is done by
+// scaling R/G/B before sending, and brightness in white mode goes through 0xE2/0x05
+// directly. The "livarno" profile is untouched — that firmware family genuinely has a
+// combined brightness+colour packet and real Y/W colour temperature.
+
 async function applyColor(hex) {
   settings.lastColor = hex;
   settings.lastMode = 'color';
   Store.set('lastColor', hex);
   Store.set('lastMode', 'color');
   const { r, g, b } = hexToRgb(hex);
-  const { opcode, params } = currentProfile().rgb(r, g, b, Number(els.sliderBrightness.value));
+  const brightness = Number(els.sliderBrightness.value);
+  const prof = currentProfile();
+  let opcode, params;
+  if (prof.key === 'livarno') {
+    ({ opcode, params } = prof.rgb(r, g, b, brightness));
+  } else {
+    const scale = brightness / 100;
+    ({ opcode, params } = prof.rgb(Math.round(r * scale), Math.round(g * scale), Math.round(b * scale)));
+  }
   await sendSafe(opcode, params, { quiet: true });
 }
 
 async function applyBrightness(value) {
   settings.lastBrightness = value;
   Store.set('lastBrightness', value);
-  const { opcode, params } = currentProfile().brightness(value);
-  await sendSafe(opcode, params, { quiet: true });
+  const prof = currentProfile();
+  if (prof.key === 'livarno') {
+    const { opcode, params } = prof.brightness(value);
+    await sendSafe(opcode, params, { quiet: true });
+    return;
+  }
+  // Generic profile: re-apply whatever mode is active at the new brightness level.
+  if (settings.lastMode === 'white') {
+    const { opcode, params } = prof.whiteLevel(value);
+    await sendSafe(opcode, params, { quiet: true });
+  } else {
+    await applyColor(settings.lastColor);
+  }
 }
 
 function whitePercentToKelvin(percent) {
@@ -210,6 +248,7 @@ function whitePercentToKelvin(percent) {
   return Math.round(prof.minKelvin + (percent / 100) * (prof.maxKelvin - prof.minKelvin));
 }
 
+// Livarno profile only: real warm/cool colour temperature via the cálido/frío slider.
 async function applyWhite(percent) {
   settings.lastWhite = percent;
   settings.lastMode = 'white';
@@ -222,6 +261,14 @@ async function applyWhite(percent) {
     maxKelvin: prof.maxKelvin,
     brightness: Number(els.sliderBrightness.value),
   });
+  await sendSafe(opcode, params);
+}
+
+// Generic profile only: "blanco" is just the white channel at the current Brillo level.
+async function useWhiteGeneric() {
+  settings.lastMode = 'white';
+  Store.set('lastMode', 'white');
+  const { opcode, params } = currentProfile().whiteLevel(Number(els.sliderBrightness.value));
   await sendSafe(opcode, params);
 }
 
@@ -311,13 +358,18 @@ els.sliderBrightness.addEventListener('change', () => applyBrightness(Number(els
 els.colorPicker.addEventListener('input', () => applyColorThrottled(els.colorPicker.value));
 els.colorPicker.addEventListener('change', () => applyColor(els.colorPicker.value));
 
+// Livarno profile only (hidden for "generic" — see updateProfileUi).
 els.sliderWhite.addEventListener('input', () => {
   const v = Number(els.sliderWhite.value);
   els.sliderWhite.style.setProperty('--fill', v + '%');
   applyWhiteThrottled(v);
 });
 els.sliderWhite.addEventListener('change', () => applyWhite(Number(els.sliderWhite.value)));
-els.btnUseWhite.addEventListener('click', () => applyWhite(Number(els.sliderWhite.value)));
+
+els.btnUseWhite.addEventListener('click', () => {
+  if (currentProfile().key === 'livarno') applyWhite(Number(els.sliderWhite.value));
+  else useWhiteGeneric();
+});
 
 els.btnSaveFavorite.addEventListener('click', () => {
   const hex = els.colorPicker.value;
@@ -385,6 +437,7 @@ els.btnTryLogin.addEventListener('click', async () => {
     Store.set('meshPassword', settings.meshPassword);
     Store.set('profile', settings.profile);
     syncSettingsFields();
+    updateProfileUi();
     await session.enableNotifications();
     logDiag(`Notificaciones: ${session.notificationsEnabled ? 'activadas' : 'no disponibles (igual se puede controlar)'}`);
     if (settings.mac) {
@@ -466,6 +519,7 @@ els.btnSaveSettings.addEventListener('click', () => {
   settings.mac = els.setMac.value.trim() || null;
   for (const k of ['meshName', 'meshPassword', 'profile', 'minKelvin', 'maxKelvin', 'mac']) Store.set(k, settings[k]);
   if (settings.mac) session.setMac(settings.mac);
+  updateProfileUi();
   setStatus('Ajustes guardados.');
 });
 
@@ -475,6 +529,7 @@ els.btnForget.addEventListener('click', async () => {
   for (const k of Object.keys(defaults)) Store.remove(k);
   settings = loadSettings();
   syncSettingsFields();
+  updateProfileUi();
   renderFavorites();
   setConnectionUi();
   setStatus('Datos borrados. Volvé a buscar la lámpara desde Diagnóstico.');
@@ -521,6 +576,7 @@ async function runConnectSequence() {
   Store.set('meshPassword', settings.meshPassword);
   Store.set('profile', settings.profile);
   syncSettingsFields();
+  updateProfileUi();
   await session.enableNotifications();
   if (!settings.mac) {
     setStatus('Conectado, pero falta configurar la MAC. Andá a la pestaña Diagnóstico (paso 3).');
@@ -547,6 +603,7 @@ function applyStoredUiState() {
   els.sliderWhite.value = settings.lastWhite;
   els.sliderWhite.style.setProperty('--fill', settings.lastWhite + '%');
   syncSettingsFields();
+  updateProfileUi();
   renderColorSwatches();
   renderFavorites();
 }

@@ -228,6 +228,14 @@ test('GenericProfile color_temp override range matches Python test', () => {
   bytesEq(prof.colorTemp(4500, { minKelvin: 2000, maxKelvin: 7000 }).params, [5, 50]);
 });
 
+test('GenericProfile.whiteLevel sends opcode 0xE2/0x05 as a plain 0-100 level', () => {
+  const prof = getProfile('generic');
+  bytesEq(prof.whiteLevel(0).params, [5, 0]);
+  bytesEq(prof.whiteLevel(100).params, [5, 100]);
+  bytesEq(prof.whiteLevel(37).params, [5, 37]);
+  bytesEq(prof.whiteLevel(150).params, [5, 100]); // clamps
+});
+
 test('LivarnoProfile matches Python ProfileTests.test_livarno', () => {
   const prof = getProfile('livarno');
   let r = prof.power(true);
